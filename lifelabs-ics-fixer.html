@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LifeLabs ICS Fixer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans text-gray-800">
+    <div class="max-w-2xl mx-auto py-16 px-4 sm:px-6 lg:px-8">
+        <div class="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
+            <div class="p-8 sm:p-10">
+                <div class="flex items-center gap-3 mb-2">
+                    <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                    <div class="uppercase tracking-wider text-xs text-indigo-600 font-bold">Utility</div>
+                </div>
+                <h1 class="block mt-1 text-3xl leading-tight font-extrabold text-gray-900 mb-4">LifeLabs ICS Fixer</h1>
+                
+                <p class="mb-8 text-gray-600 leading-relaxed">
+                    Upload your broken LifeLabs <code>.ics</code> file to automatically fix missing properties, line endings, date formatting, and character limits. The corrected file will be downloaded immediately.
+                </p>
+
+                <div class="mb-8">
+                    <label class="block text-sm font-bold text-gray-700 mb-3">Upload ICS File</label>
+                    <div class="flex items-center justify-center w-full">
+                        <label for="fileInput" class="flex flex-col items-center justify-center w-full h-40 border-2 border-indigo-200 border-dashed rounded-xl cursor-pointer bg-indigo-50 hover:bg-indigo-100 transition-colors">
+                            <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                                <svg class="w-10 h-10 mb-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                                <p class="mb-2 text-sm text-gray-500"><span class="font-semibold text-indigo-600">Click to upload</span> or drag and drop</p>
+                                <p class="text-xs text-gray-400">.ics calendar files only</p>
+                            </div>
+                            <input type="file" id="fileInput" accept=".ics" class="hidden" />
+                        </label>
+                    </div>
+                    <p id="fileName" class="mt-3 text-sm font-medium text-gray-600 hidden text-center">Selected: <span></span></p>
+                </div>
+                
+                <div class="flex flex-col sm:flex-row items-center gap-4">
+                    <button id="fixBtn" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        Fix & Download
+                    </button>
+                    <span id="status" class="text-sm font-semibold text-emerald-600 hidden flex items-center gap-1">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                        Successfully fixed!
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const fileName = document.getElementById('fileName');
+        const fixBtn = document.getElementById('fixBtn');
+        const status = document.getElementById('status');
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                fileName.querySelector('span').textContent = e.target.files[0].name;
+                fileName.classList.remove('hidden');
+                fixBtn.disabled = false;
+            } else {
+                fileName.classList.add('hidden');
+                fixBtn.disabled = true;
+            }
+        });
+
+        function fixIcs(content) {
+            // Unfold lines first
+            let lines = content.split(/\r?\n/);
+            let unfolded = [];
+            for (let line of lines) {
+                if (line.startsWith(' ') || line.startsWith('\t')) {
+                    if (unfolded.length > 0) {
+                        unfolded[unfolded.length - 1] += line.substring(1);
+                    }
+                } else {
+                    if (line.trim().length > 0) {
+                        unfolded.push(line);
+                    }
+                }
+            }
+
+            let fixedLines = [];
+            let eventLines = [];
+            let inEvent = false;
+            let hasProdid = unfolded.some(l => l.startsWith('PRODID'));
+
+            for (let line of unfolded) {
+                if (line === 'BEGIN:VEVENT') {
+                    inEvent = true;
+                    eventLines = [line];
+                    continue;
+                }
+                
+                if (inEvent) {
+                    if (line === 'END:VEVENT') {
+                        eventLines.push(line);
+                        
+                        let hasUid = eventLines.some(l => l.startsWith('UID:'));
+                        let hasDtstamp = eventLines.some(l => l.startsWith('DTSTAMP:'));
+                        
+                        let processedEvent = [];
+                        for (let eLine of eventLines) {
+                            // Fix DTSTART and DTEND formatting (remove dashes and colons)
+                            if (eLine.startsWith('DTSTART:') || eLine.startsWith('DTEND:')) {
+                                let colonIdx = eLine.indexOf(':');
+                                let prop = eLine.substring(0, colonIdx);
+                                let val = eLine.substring(colonIdx + 1).replace(/[-:]/g, '');
+                                eLine = prop + ':' + val;
+                            }
+                            processedEvent.push(eLine);
+                            
+                            // Inject UID and DTSTAMP if missing right after BEGIN:VEVENT
+                            if (eLine === 'BEGIN:VEVENT') {
+                                if (!hasUid) {
+                                    const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '') + 'Z';
+                                    processedEvent.push('UID:' + timestamp + '-Fixer-UID');
+                                }
+                                if (!hasDtstamp) {
+                                    const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '') + 'Z';
+                                    processedEvent.push('DTSTAMP:' + timestamp);
+                                }
+                            }
+                        }
+                        
+                        fixedLines.push(...processedEvent);
+                        inEvent = false;
+                    } else {
+                        eventLines.push(line);
+                    }
+                } else {
+                    fixedLines.push(line);
+                    if (line.startsWith('VERSION:') && !hasProdid) {
+                        fixedLines.push('PRODID:-//LifeLabs Appointment Fixer//EN');
+                    }
+                }
+            }
+
+            // Function to fold long lines correctly with CRLF + SPACE
+            function foldLine(line) {
+                if (line.length <= 75) return line;
+                let result = [];
+                result.push(line.substring(0, 75));
+                line = line.substring(75);
+                while (line.length > 74) {
+                    result.push(" " + line.substring(0, 74));
+                    line = line.substring(74);
+                }
+                if (line) {
+                    result.push(" " + line);
+                }
+                return result.join('\r\n');
+            }
+
+            // Map all lines, fold them, and join with CRLF endings
+            return fixedLines.map(foldLine).join('\r\n') + '\r\n';
+        }
+
+        fixBtn.addEventListener('click', () => {
+            if (fileInput.files.length === 0) return;
+
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                const content = e.target.result;
+                const fixedContent = fixIcs(content);
+                
+                // Create download link for the fixed ICS file
+                const blob = new Blob([fixedContent], { type: 'text/calendar;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'fixed_' + file.name;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Cleanup
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                // Show success message
+                status.classList.remove('hidden');
+                setTimeout(() => status.classList.add('hidden'), 4000);
+            };
+
+            reader.readAsText(file);
+        });
+    </script>
+</body>
+</html>
